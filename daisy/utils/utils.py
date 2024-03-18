@@ -1,7 +1,9 @@
 import os
 import torch
 import datetime
+import pickle
 import numpy as np
+import csv
 import scipy.sparse as sp
 from collections import defaultdict
 
@@ -49,6 +51,80 @@ def get_ir(df):
         ir[int(row['item'])].add(int(row['user']))
 
     return ir
+
+
+
+def build_candidates_set_per_user(test_ur, train_ur, items_info, user_bboxes, config, drop_past_inter=True):
+    candidates_num = config['cand_num']
+    min_size = config['min_size']
+    # Check if the .pkl file exists
+    file_name = 'data/yelp/items_within_bb_'+ str(min_size)+ '.pkl'
+    if os.path.exists(file_name):
+        print("Loading items_within_bb from pickle file.")
+        with open(file_name, 'rb') as f:
+            items_within_bb = pickle.load(f)
+    else:
+        print("Pickle file not found. Computing items_within_bb.")
+        items_within_bb = {user_id: set() for user_id in user_bboxes}
+        for item_id, item in items_info.items():
+            for user_id, bb in user_bboxes.items():
+                min_lat, max_lat, min_lon, max_lon = bb
+                if min_lat <= item['latitude'] <= max_lat and min_lon <= item['longitude'] <= max_lon:
+                    items_within_bb[user_id].add(item_id)
+        print("Precomputing user's bounding boxes done")
+        # Save the computed items_within_bb to a .pkl file for future use
+        with open(file_name, 'wb') as f:
+            pickle.dump(items_within_bb, f)
+            
+    item_num = config['item_num']
+    candidates_num = config['cand_num']
+    pos_filtered_percentages = []
+    neg_filtered_percentages = []
+    test_ucands, test_u = [], []
+    for u, r in test_ur.items():
+        sample_num = candidates_num - len(r) if len(r) <= candidates_num else 0
+        if sample_num == 0:
+            samples = np.random.choice(list(r), candidates_num)
+        else:
+            pos_items = list(r) + list(train_ur[u]) if drop_past_inter else list(r)
+            neg_items = np.setdiff1d(np.arange(item_num), pos_items)
+            neg_samples = np.random.choice(neg_items, size=sample_num)
+            samples = np.concatenate((neg_samples, list(r)), axis=None)
+        if u in items_within_bb:
+            test_pos_samples = [item for item in r if item in items_within_bb[u]]
+            test_neg_samples = [item for item in neg_samples if item in items_within_bb[u]]
+            pos_filtered_percentage = 100 * (1 - len(test_pos_samples) / len(list(r))) if len(list(r)) > 0 else 0
+            neg_filtered_percentage = 100 * (1 - len(test_neg_samples) / len(neg_items)) if len(neg_items) > 0 else 0
+            pos_filtered_percentages.append(pos_filtered_percentage)
+            neg_filtered_percentages.append(neg_filtered_percentage)
+            filtered_samples = np.concatenate((test_neg_samples, test_pos_samples), axis=None)
+            if len(filtered_samples) == 0:
+                continue
+            # Pad the samples array with -1 if it's shorter than candidates_num
+            if len(filtered_samples) < candidates_num:
+                samples = np.pad(filtered_samples, (0, candidates_num - len(filtered_samples)), constant_values=(-1,))
+    
+        test_ucands.append([u, samples])
+        test_u.append(u)
+    file_path = 'filter_percentage_'+ str(config['min_size']) + '.csv'
+
+    # Open the file in write mode ('w') and create a csv.writer object
+    # newline='' is used to prevent writing extra blank rows in some environments
+    with open(file_path, 'w', newline='') as csvfile:
+        writer = csv.writer(csvfile)
+        
+        # Optionally, write headers as the first row
+        writer.writerow(['user','pos_filtered_percentage', 'neg_filtered_percentage'])
+        
+        # Write the contents of both lists to the file, row by row
+        for user, item1, item2 in zip(test_ur.keys(),pos_filtered_percentages, neg_filtered_percentages):
+            writer.writerow([user,item1, item2])
+
+    # Inform the user that the lists have been written to the file
+    print(f"Lists have been written to {file_path}")
+
+    return test_u, test_ucands
+
 
 def build_candidates_set(test_ur, train_ur, config, drop_past_inter=True):
     """

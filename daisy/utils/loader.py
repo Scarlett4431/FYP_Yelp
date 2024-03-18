@@ -6,23 +6,25 @@ import requests
 import numpy as np
 import pandas as pd
 import scipy.io as sio
+from scipy.spatial.distance import cdist
 from collections import Counter
-
+from math import radians, cos, sin, asin, sqrt
 from daisy.utils.utils import ensure_dir
 
 
 class RawDataReader(object):
     def __init__(self, config):
         self.src = config['dataset']
+        self.ds_path = f"{config['data_path']}{self.src}/"
         self.uid_name = config['UID_NAME']
         self.iid_name = config['IID_NAME']
         self.tid_name = config['TID_NAME']
         self.inter_name = config['INTER_NAME']
         self.logger = config['logger']
 
-        self.ds_path = f"{config['data_path']}{self.src}/"
         ensure_dir(self.ds_path)
         self.logger.info(f'Current data path is: {self.ds_path}, make sure you put the right raw data into it...')
+    
 
     def get_data(self):
         df = pd.DataFrame()
@@ -30,88 +32,6 @@ class RawDataReader(object):
             fp = f'{self.ds_path}u.data'
             df = pd.read_csv(fp, sep='\t', header=None,
                             names=[self.uid_name, self.iid_name, self.inter_name, self.tid_name], engine='python')
-
-        elif self.src == 'ml-1m':
-            fp = f'{self.ds_path}ratings.dat'
-            df = pd.read_csv(fp, sep='::', header=None, 
-                            names=[self.uid_name, self.iid_name, self.inter_name, self.tid_name], engine='python')
-        
-        elif self.src == 'ml-10m':
-            fp = f'{self.ds_path}ratings.dat'
-            df = pd.read_csv(fp, sep='::', header=None, 
-                            names=[self.uid_name, self.iid_name, self.inter_name, self.tid_name], engine='python')
-        elif self.src == 'ml-20m':
-            fp = f'{self.ds_path}ratings.csv'
-            df = pd.read_csv(fp)
-            df.rename(columns={'userId':self.uid_name, 'movieId': self.iid_name}, inplace=True)
-
-        elif self.src == 'netflix':
-            cnt = 0
-            tmp_file = open(f'{self.ds_path}training_data.csv', 'w')
-            tmp_file.write(f'{self.uid_name},{self.iid_name},{self.inter_name},{self.tid_name}' + '\n')
-            for f in os.listdir(f'{self.ds_path}training_set/'):
-                cnt += 1
-                if cnt % 5000 == 0:
-                    self.logger.info(f'Finish Process {cnt} file......')
-                txt_file = open(f'{self.ds_path}training_set/{f}', 'r')
-                contents = txt_file.readlines()
-                item = contents[0].strip().split(':')[0]
-                for val in contents[1:]:
-                    user, rating, timestamp = val.strip().split(',')
-                    tmp_file.write(','.join([user, item, rating, timestamp]) + '\n')
-                txt_file.close()
-            tmp_file.close()
-
-            df = pd.read_csv(f'{self.ds_path}training_data.csv')
-            df[self.inter_name] = df.rating.astype(float)
-            df[self.tid_name] = pd.to_datetime(df['timestamp'])
-
-        elif self.src == 'lastfm':
-            df = pd.read_csv(f'{self.ds_path}user_artists.dat', sep='\t')
-            df.rename(columns={'userID': self.uid_name, 'artistID': self.iid_name, 'weight': self.inter_name}, inplace=True)
-            # treat weight as interaction, as 1
-            df[self.inter_name] = 1.0
-            # fake timestamp column
-            df[self.tid_name] = 1
-
-        elif self.src == 'book-x':
-            df = pd.read_csv(f'{self.ds_path}BX-Book-Ratings.csv', delimiter=";", encoding="latin1")
-            df.rename(columns={'User-ID': self.uid_name, 'ISBN': self.iid_name, 'Book-Rating': self.inter_name}, inplace=True)
-            # fake timestamp column
-            df[self.tid_name] = 1
-
-        elif self.src == 'pinterest':
-            # TODO this dataset has wrong source URL, we will figure out in future
-            pass
-
-        elif self.src == 'amazon-cloth':
-            df = pd.read_csv(f'{self.ds_path}ratings_Clothing_Shoes_and_Jewelry.csv', 
-                            names=[self.uid_name, self.iid_name, self.inter_name, self.tid_name])
-
-        elif self.src == 'amazon-electronic':
-            df = pd.read_csv(f'{self.ds_path}ratings_Electronics.csv', 
-                            names=[self.uid_name, self.iid_name, self.inter_name, self.tid_name])
-
-        elif self.src == 'amazon-book':
-            df = pd.read_csv(f'{self.ds_path}ratings_Books.csv', 
-                            names=[self.uid_name, self.iid_name, self.inter_name, self.tid_name], low_memory=False)
-            df = df[df[self.tid_name].str.isnumeric()].copy()
-            df[self.tid_name] = df[self.tid_name].astype(int)
-
-        elif self.src == 'amazon-music':
-            df = pd.read_csv(f'{self.ds_path}ratings_Digital_Music.csv', 
-                            names=[self.uid_name, self.iid_name, self.inter_name, self.tid_name])
-
-        elif self.src == 'epinions':
-            d = sio.loadmat(f'{self.ds_path}rating_with_timestamp.mat')
-            prime = []
-            for val in d['rating_with_timestamp']:
-                user, item, rating, timestamp = val[0], val[1], val[3], val[5]
-                prime.append([user, item, rating, timestamp])
-            df = pd.DataFrame(prime, columns=[self.uid_name, self.iid_name, self.inter_name, self.tid_name])
-            del prime
-            gc.collect()
-
         elif self.src == 'yelp':
             json_file_path = f'{self.ds_path}yelp_academic_dataset_review.json'
             prime = []
@@ -123,22 +43,8 @@ class RawDataReader(object):
             del prime
             gc.collect()
 
-        elif self.src == 'citeulike':
-            user = 0
-            dt = []
-            for line in open(f'{self.ds_path}users.dat', 'r'):
-                val = line.split()
-                for item in val:
-                    dt.append([user, item])
-                user += 1
-            df = pd.DataFrame(dt, columns=[self.uid_name, self.iid_name])
-            # fake timestamp column
-            df[self.tid_name] = 1
-            df[self.inter_name] = 1.0
-
         else:
             raise NotImplementedError('Invalid Dataset Error')
-        
         return df
 
 class Preprocessor(object):
@@ -167,12 +73,218 @@ class Preprocessor(object):
         self.pos_threshold = config['positive_threshold']
         self.level = config['level'] # ui, u, i
         self.logger = config['logger']
+        self.src = config['dataset']
+        self.ds_path = f"{config['data_path']}{self.src}/"
 
         self.get_pop = True if 'popularity' in config['metrics'] else False
 
         self.user_num, self.item_num = None, None
         self.item_pop = None
+        
+    def create_items_info(self):
+        """
+        Create a dictionary with item integer indexes as keys and their geographic information as values.
 
+        Returns
+        -------
+        items_info : dict
+            A dictionary where each key is an item integer index, and the value is another dictionary with 'latitude' and 'longitude'.
+        """
+        json_file_path = f'{self.ds_path}yelp_academic_dataset_business.json'
+        items_info = {}
+        for line in open(json_file_path, 'r', encoding='UTF-8'):
+            item = json.loads(line)
+            item_token = item['business_id']
+            if item_token in self.token_iid:
+                item_id = self.token_iid[item_token]
+                items_info[item_id] = {'latitude': item['latitude'], 'longitude': item['longitude']}
+        return items_info
+
+    def calculate_geometric_median(self, X, eps=1e-5):
+        """
+        Calculate the geometric median for a set of points.
+        """
+        y = np.mean(X, 0)
+
+        while True:
+            D = cdist(X, [y])
+            nonzeros = (D != 0)[:, 0]
+
+            Dinv = 1 / D[nonzeros]
+            Dinvs = np.sum(Dinv)
+            W = Dinv / Dinvs
+            T = np.sum(W * X[nonzeros], 0)
+
+            num_zeros = len(X) - np.sum(nonzeros)
+            if num_zeros == 0:
+                y1 = T
+            elif num_zeros == len(X):
+                return y
+            else:
+                R = (T - y) * Dinvs
+                r = np.linalg.norm(R)
+                rinv = 0 if r == 0 else num_zeros/r
+                y1 = max(0, 1-rinv)*T + min(1, rinv)*y
+
+            if np.linalg.norm(y - y1) < eps:
+                return y1
+
+            y = y1
+
+    def create_adjusted_user_bboxes(self, items_info, coverage):
+        """
+        Create a dictionary mapping each user ID to an adjusted bounding box based on a percentage of locations they have visited.
+        """
+        # Initial user_locations dictionary to store all locations for each user
+        user_locations = {}
+        json_file_path = f'{self.ds_path}yelp_academic_dataset_review.json'
+        count = 0
+        for line in open(json_file_path, 'r', encoding='UTF-8'):
+            if count % 100000 == 0:
+                print(count)
+            count += 1
+            review = json.loads(line)
+            user_id = review['user_id']
+            business_id = review['business_id']
+            if business_id is None:
+                continue
+            business_info = items_info.get(business_id)
+
+            if not business_info:
+                continue
+
+            if user_id not in user_locations:
+                user_locations[user_id] = []
+            user_locations[user_id].append((business_info['latitude'], business_info['longitude']))
+
+        user_bboxes = {}
+        for user, locations in user_locations.items():
+            locations = np.array(locations)
+            if len(locations) <= 1:
+                continue  # Need at least 2 locations to adjust bounding box
+
+            # Calculate geometric median
+            median_location = self.calculate_geometric_median(locations)
+
+            # Calculate distances from median and sort locations by distance
+            distances = np.linalg.norm(locations - median_location, axis=1)
+            sorted_indices = np.argsort(distances)
+            cutoff_index = int(len(sorted_indices) * coverage)  # Keep only a certain percentage
+
+            # Select locations based on coverage
+            selected_locations = locations[sorted_indices[:cutoff_index]]
+
+            # Calculate bounding box for selected locations
+            min_lat, max_lat = np.min(selected_locations[:, 0]), np.max(selected_locations[:, 0])
+            min_lon, max_lon = np.min(selected_locations[:, 1]), np.max(selected_locations[:, 1])
+
+            user_bboxes[user] = (min_lat, max_lat, min_lon, max_lon)
+            
+        return user_bboxes
+        
+    def haversine(self, lon1, lat1, lon2, lat2):
+        """
+        Calculate the great circle distance in kilometers between two points 
+        on the earth (specified in decimal degrees)
+        """
+        # convert decimal degrees to radians 
+        lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
+
+        # haversine formula 
+        dlon = lon2 - lon1 
+        dlat = lat2 - lat1 
+        a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+        c = 2 * asin(sqrt(a)) 
+        r = 6371 # Radius of earth in kilometers. Use 3956 for miles
+        return c * r
+
+    def bounding_box_area(self, min_lat, max_lat, min_lon, max_lon):
+        """
+        Calculate the area of a bounding box in square kilometers
+        """
+        # Height of the bounding box in km (distance between the min and max latitudes)
+        height = self.haversine((min_lon + max_lon) / 2, min_lat, (min_lon + max_lon) / 2, max_lat)
+        
+        # Width of the bounding box at min_lat and max_lat, then take the average
+        width_min_lat = self.haversine(min_lon, min_lat, max_lon, min_lat)
+        width_max_lat = self.haversine(min_lon, max_lat, max_lon, max_lat)
+        width = (width_min_lat + width_max_lat) / 2
+        
+        # Area in square kilometers
+        area = width * height
+        return area
+        
+    def update_bbox(self, bbox, lat, lon):
+        """
+        Update the bounding box to include a new point (lat, lon) and ensure it has a minimum size.
+        
+        :param bbox: Current bounding box as a tuple (min_lat, max_lat, min_lon, max_lon)
+        :param lat: Latitude of the new point
+        :param lon: Longitude of the new point
+        :param min_size: Minimum size of the sides of the bounding box (in degrees)
+        :return: Updated bounding box
+        """
+        min_lat, max_lat, min_lon, max_lon = bbox
+        
+        # Update the bounding box to include the new point
+        min_lat = min(min_lat, lat)
+        max_lat = max(max_lat, lat)
+        min_lon = min(min_lon, lon)
+        max_lon = max(max_lon, lon)    
+        return min_lat, max_lat, min_lon, max_lon
+    
+    def adjust_box(self, bbox, min_size):
+        # Check if the bounding box is too small and adjust if necessary
+        min_lat, max_lat, min_lon, max_lon = bbox
+        if max_lat - min_lat < min_size:
+            expansion = (max_lat - min_lat) * 0.5
+            min_lat -= expansion
+            max_lat += expansion
+            
+        if max_lon - min_lon < min_size:
+            expansion = (max_lon - min_lon) * 0.5
+            min_lon -= expansion
+            max_lon += expansion
+        return min_lat, max_lat, min_lon, max_lon
+    
+    def create_user_bboxes(self, items_info, total_train_ur, min_size):
+        """
+        Create a dictionary mapping each user integer index to a bounding box based on the businesses they have interacted with in the training dataset.
+
+        Returns
+        -------
+        user_bboxes : dict
+            A dictionary where keys are user integer indexes and values are tuples representing the bounding box for each user
+            (min_lat, max_lat, min_lon, max_lon).
+        """
+        user_bboxes = {}
+        json_file_path = f'{self.ds_path}yelp_academic_dataset_review.json'
+        for line in open(json_file_path, 'r', encoding='UTF-8'):
+            review = json.loads(line)
+            user_token = review['user_id']
+            business_token = review['business_id']
+            
+            if user_token not in self.token_uid or business_token not in self.token_iid:
+                continue
+            user_id = self.token_uid[user_token]
+            business_id = self.token_iid[business_token]
+            # Skip if business_id is None or if the user-business interaction is not in the training set
+            if business_id is None or user_id not in total_train_ur or business_id not in total_train_ur[user_id]:
+                continue
+
+            business_info = items_info.get(business_id)
+            if not business_info:
+                continue  # Skip businesses with no geographic information
+
+            bbox = user_bboxes.get(user_id, (float('inf'), float('-inf'), float('inf'), float('-inf')))
+            min_lat, max_lat, min_lon, max_lon = self.update_bbox(bbox, business_info['latitude'], business_info['longitude'])
+            user_bboxes[user_id] = (min_lat, max_lat, min_lon, max_lon)
+        for user_id, bbox in user_bboxes.items():
+            min_lat, max_lat, min_lon, max_lon = self.adjust_box(bbox, min_size)
+            user_bboxes[user_id] = (min_lat, max_lat, min_lon, max_lon)
+        return user_bboxes
+
+        
     def process(self, df):
         df = self.__remove_duplication(df)
         df = self.__reserve_pos(df)
@@ -215,7 +327,10 @@ class Preprocessor(object):
         self.token_iid = {iid: token for token, iid in enumerate(self.iid_token)}
         df['user'] = pd.Categorical(df['user']).codes
         df['item'] = pd.Categorical(df['item']).codes
-
+        with open("token_iid.json", 'w') as f:
+            json.dump(self.token_iid, f)
+        with open("token_uid.json", 'w') as f:
+            json.dump(self.token_uid, f)
         return df
 
     def __get_stats(self, df):

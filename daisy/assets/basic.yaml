@@ -26,6 +26,9 @@ init_method: 'default'
 optimizer: 'default'
 early_stop: True
 
+boarding_box: False
+min_size: 1
+
 data_path: 'data/'
 res_path: ~
 dataset: 'ml-100k'

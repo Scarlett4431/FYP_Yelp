@@ -23,7 +23,7 @@ from daisy.utils.config import init_seed, init_config, init_logger
 from daisy.utils.metrics import MAP, NDCG, Recall, Precision, HR, MRR
 from daisy.utils.sampler import BasicNegtiveSampler, SkipGramNegativeSampler
 from daisy.utils.dataset import AEDataset, BasicDataset, CandidatesDataset, get_dataloader
-from daisy.utils.utils import get_history_matrix, get_ur, build_candidates_set, ensure_dir, get_inter_matrix
+from daisy.utils.utils import get_history_matrix, get_ur, build_candidates_set, ensure_dir, get_inter_matrix, build_candidates_set_per_user
 
 model_config = {
     'mostpop': MostPop,
@@ -120,18 +120,25 @@ if __name__ == '__main__':
 
     ''' Test Process for Metrics Exporting '''
     reader, processor = RawDataReader(config), Preprocessor(config)
+    items_info = reader.create_items_info()
+    user_bboxes= reader.create_user_bboxes(items_info)
+    # user_bboxes = reader.create_adjusted_user_bboxes(items_info, coverage=0.8)
     df = reader.get_data()
     df = processor.process(df)
+    items_info = processor.process_item_info(items_info)
+    user_bboxes = processor.process_user_bboxes(user_bboxes)
     user_num, item_num = processor.user_num, processor.item_num
 
     config['user_num'] = user_num
     config['item_num'] = item_num
+    logger.info("Number of users: %d", user_num)
+    logger.info("Number of items: %d", item_num)
 
     ''' Train Test split '''
     splitter = TestSplitter(config)
     train_index, test_index = splitter.split(df)
     train_set, test_set = df.iloc[train_index, :].copy(), df.iloc[test_index, :].copy()
-
+    logger.info("Generate train set, test set")
     ''' define optimization target function '''
     def objective(trial):
         global TRIAL_CNT
@@ -201,15 +208,19 @@ if __name__ == '__main__':
 
             ''' build candidates set '''
             logger.info('Start Calculating Metrics...')
-            val_u, val_ucands = build_candidates_set(val_ur, train_ur, config)
-
+            # val_u, val_ucands = build_candidates_set(val_ur, train_ur, config)
+            val_u, val_ucands = build_candidates_set_per_user(val_ur, train_ur, items_info, user_bboxes, config)
             ''' get predict result '''
             logger.info('==========================')
             logger.info('Generate recommend list...')
             logger.info('==========================')
             val_dataset = CandidatesDataset(val_ucands)
+            logger.info(len(val_ucands)) #number of val user
+            logger.info(len(val_ucands[0][1])) # two items, the first is the index of the val user, the sec is the list of candidates
+            
             val_loader = get_dataloader(val_dataset, batch_size=128, shuffle=False, num_workers=0)
-            preds = model.rank(val_loader) 
+            preds = model.rank(val_loader)  #only return the top k items predicted
+            logger.info(preds.shape) #(137, 50)
 
             ''' calculating KPIs '''
             kpi = metrics_config[kpi_name](val_ur, preds, val_u)

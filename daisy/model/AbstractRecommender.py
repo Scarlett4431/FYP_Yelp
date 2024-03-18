@@ -127,7 +127,7 @@ class GeneralRecommender(AbstractRecommender):
 
                 current_loss += loss.item()
             pbar.set_postfix(loss=current_loss)
-
+            print(current_loss)
             self.eval()
             delta_loss = float(current_loss - last_loss)
             if (abs(delta_loss) < 1e-5) and self.early_stop:

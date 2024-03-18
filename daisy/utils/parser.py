@@ -115,6 +115,9 @@ def parse_args():
     parser.add_argument('--epochs', 
                         type=int, 
                         help='training epochs')
+    parser.add_argument("--min_size",
+            type=float, 
+            help="whether to activate early stop mechanism")
     parser.add_argument('--batch_size', 
                         type=int, 
                         help='batch size for training')
@@ -131,6 +134,9 @@ def parse_args():
     parser.add_argument("--early_stop",
                         action="store_true",
                         help="whether to activate early stop mechanism")
+    parser.add_argument("--boarding_box",
+                    action="store_true",
+                    help="whether to activate early stop mechanism")
     args = parser.parse_args()
 
     return args

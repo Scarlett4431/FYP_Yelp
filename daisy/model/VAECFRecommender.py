@@ -118,24 +118,58 @@ class VAECF(AERecommender):
 
         return scores[[torch.arange(len(i)).to(self.device), i]].cpu().item()
 
+    # def rank(self, test_loader):
+    #     rec_ids = torch.tensor([], device=self.device)
+
+    #     for us, cands_ids in test_loader:
+    #         us = us.to(self.device)
+    #         cands_ids = cands_ids.to(self.device)
+
+    #         rating_matrix = self.get_user_rating_matrix(us)
+    #         scores, _, _ = self.forward(rating_matrix) # dimension of scores: batch * item_num
+    #         scores = scores[torch.arange(cands_ids.shape[0]).to(self.device).reshape(-1, 1).expand_as(cands_ids), cands_ids] # batch * item_num -> batch * cand_num
+
+    #         rank_ids = torch.argsort(scores, descending=True)
+    #         rank_list = torch.gather(cands_ids, 1, rank_ids)
+    #         rank_list = rank_list[:, :self.topk]
+
+    #         rec_ids = torch.cat((rec_ids, rank_list), 0)
+
+    #     return rec_ids.cpu().numpy()
+    
     def rank(self, test_loader):
         rec_ids = torch.tensor([], device=self.device)
 
         for us, cands_ids in test_loader:
             us = us.to(self.device)
-            cands_ids = cands_ids.to(self.device)
+            cands_ids = cands_ids.to(self.device).long()  # Ensure cands_ids is of a long type for indexing
+
+            # Identify padded elements in cands_ids
+            valid_mask = cands_ids != -1
 
             rating_matrix = self.get_user_rating_matrix(us)
-            scores, _, _ = self.forward(rating_matrix) # dimension of scores: batch * item_num
-            scores = scores[torch.arange(cands_ids.shape[0]).to(self.device).reshape(-1, 1).expand_as(cands_ids), cands_ids] # batch * item_num -> batch * cand_num
+            scores, _, _ = self.forward(rating_matrix)  # dimension of scores: batch * item_num
 
-            rank_ids = torch.argsort(scores, descending=True)
+            # Initially, set scores for padded elements to -inf to ensure they are ranked last
+            adjusted_scores = torch.full(cands_ids.shape, float('-inf'), dtype=torch.float32, device=self.device)
+
+            # Extract scores for valid (non-padded) entries
+            batch_indices = torch.arange(cands_ids.shape[0], device=self.device).unsqueeze(1).expand_as(cands_ids)
+            valid_scores = scores[batch_indices[valid_mask], cands_ids[valid_mask]]
+
+            # Place valid_scores back into adjusted_scores at the correct positions
+            adjusted_scores[valid_mask] = valid_scores
+
+            # Now perform sorting and selection based on the adjusted scores
+            rank_ids = torch.argsort(adjusted_scores, descending=True)
             rank_list = torch.gather(cands_ids, 1, rank_ids)
             rank_list = rank_list[:, :self.topk]
 
             rec_ids = torch.cat((rec_ids, rank_list), 0)
 
         return rec_ids.cpu().numpy()
+
+
 
     def full_rank(self, u):
         u = torch.tensor([u], device=self.device)

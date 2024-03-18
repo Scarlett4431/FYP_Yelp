@@ -437,20 +437,55 @@ class ItemKNNCF(GeneralRecommender):
 
         return self.pred_mat[u, i]
 
+    # def rank(self, test_loader):
+    #     rec_ids = None
+
+    #     for us, cands_ids in test_loader:
+    #         us = us.numpy()
+    #         cands_ids = cands_ids.numpy()
+    #         scores = self.pred_mat[us[:, np.newaxis], cands_ids].A
+    #         rank_ids = np.argsort(-scores)[:, :self.topk]
+    #         rank_list = cands_ids[np.repeat(np.arange(len(rank_ids)).reshape(-1, 1), rank_ids.shape[1], axis=1), rank_ids]
+
+    #         rec_ids = rank_list if rec_ids is None else np.vstack([rec_ids, rank_list])
+
+    #     return rec_ids
+
     def rank(self, test_loader):
         rec_ids = None
 
         for us, cands_ids in test_loader:
             us = us.numpy()
             cands_ids = cands_ids.numpy()
-            scores = self.pred_mat[us[:, np.newaxis], cands_ids].A
-            rank_ids = np.argsort(-scores)[:, :self.topk]
-            rank_list = cands_ids[np.repeat(np.arange(len(rank_ids)).reshape(-1, 1), rank_ids.shape[1], axis=1), rank_ids]
+            
+            # Initialize a mask for valid candidate indices (not -1)
+            valid_mask = cands_ids != -1
+            
+            # Initialize scores array filled with -inf for comparison
+            scores = np.full(cands_ids.shape, float('-inf'))
 
-            rec_ids = rank_list if rec_ids is None else np.vstack([rec_ids, rank_list])
+            # Iterate through each user and their candidate items
+            for idx, user in enumerate(us):
+                valid_items = cands_ids[idx][valid_mask[idx]]
+                if len(valid_items) > 0:  # Ensure there are valid items
+                    # Fetch scores only for valid candidate items
+                    user_scores = self.pred_mat[user, valid_items].A.flatten()
+                    scores[idx, valid_mask[idx]] = user_scores
+
+            # Sort scores and get the indices of the top-k items, taking care of padding
+            rank_ids = np.argsort(-scores)[:, :self.topk]
+            
+            # Use np.take_along_axis if you prefer numpy>=1.15, otherwise use the method shown below to gather top-k rankings
+            rank_list = np.array([[cands_ids[i, j] for j in rank_ids[i]] for i in range(len(rank_ids))])
+
+            # Combine results from each batch
+            if rec_ids is None:
+                rec_ids = rank_list
+            else:
+                rec_ids = np.vstack([rec_ids, rank_list])
 
         return rec_ids
-
+    
     def full_rank(self, u):
         scores = self.pred_mat[u, :].A.squeeze()
 

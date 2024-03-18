@@ -175,6 +175,51 @@ class NeuMF(GeneralRecommender):
 
         return pred
 
+
+    # def rank(self, test_loader):
+    #     rec_ids = torch.tensor([], device=self.device)
+
+    #     for us, cands_ids in test_loader:
+    #         us = us.to(self.device)
+    #         cands_ids = cands_ids.to(self.device)
+
+    #         # Create a mask for valid candidate ids (not padded)
+    #         valid_mask = cands_ids != -1
+
+    #         if not self.model == 'MLP':
+    #             embed_user_GMF = self.embed_user_GMF(us).unsqueeze(dim=1)  # batch * 1 * factor
+    #             embed_item_GMF = self.embed_item_GMF(cands_ids)  # batch * cand_num * factor
+    #             output_GMF = embed_user_GMF * embed_item_GMF  # batch * cand_num * factor
+    #         if not self.model == 'GMF':
+    #             embed_user_MLP = self.embed_user_MLP(us).unsqueeze(dim=1)  # batch * 1 * factor
+    #             embed_item_MLP = self.embed_item_MLP(cands_ids)  # batch * cand_num * factor
+    #             interaction = torch.cat((embed_user_MLP.expand_as(embed_item_MLP), embed_item_MLP), dim=-1)  # batch * cand_num * (2 * factor)
+    #             output_MLP = self.MLP_layers(interaction)  # batch * cand_num * dim
+            
+    #         if self.model == 'GMF':
+    #             concat = output_GMF
+    #         elif self.model == 'MLP':
+    #             concat = output_MLP
+    #         else:
+    #             concat = torch.cat((output_GMF, output_MLP), -1)  # batch * cand_num * (dim + factor)
+    #         scores = self.predict_layer(concat).squeeze()  # batch * cand_num
+
+    #         # Use the valid_mask to set scores of padded items to a very low value
+    #         scores = torch.where(valid_mask, scores, torch.tensor(float('-inf'), device=self.device))
+
+    #         rank_ids = torch.argsort(scores, descending=True)
+    #         rank_list = torch.gather(cands_ids, 1, rank_ids)
+            
+    #         # Apply valid_mask to ensure padded values remain at the end after topk selection
+    #         rank_list = torch.where(valid_mask, rank_list, torch.tensor(-1, device=self.device))
+            
+    #         rank_list = rank_list[:, :self.topk]
+
+    #         rec_ids = torch.cat((rec_ids, rank_list), 0)
+
+    #     return rec_ids.cpu().numpy()
+
+
     def rank(self, test_loader):
         rec_ids = torch.tensor([], device=self.device)
 

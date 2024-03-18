@@ -60,22 +60,53 @@ class PureSVD(GeneralRecommender):
     def predict(self, u, i):
         return self.user_vec[u, :].dot(self.item_vec[i, :])
 
+    # def rank(self, test_loader):
+    #     rec_ids = None
+
+    #     for us, cands_ids in test_loader:
+    #         us = us.numpy()
+    #         cands_ids = cands_ids.numpy() # batch * cand_num
+
+    #         user_emb = np.expand_dims(self.user_vec[us, :], axis=1) # batch * factor -> batch * 1 * factor
+    #         items_emb = self.item_vec[cands_ids, :].transpose(0, 2, 1)  # batch * cand_num * factor -> batch * factor * cand_num
+    #         scores = np.einsum('BNi,BiM -> BNM', user_emb, items_emb).squeeze() # batch * 1 * cand_num -> batch * cand_num
+    #         rank_ids = np.argsort(-scores)[:, :self.topk]
+    #         rank_list = cands_ids[np.repeat(np.arange(len(rank_ids)).reshape(-1, 1), rank_ids.shape[1], axis=1), rank_ids]
+            
+    #         rec_ids = rank_list if rec_ids is None else np.vstack([rec_ids, rank_list])
+
+    #     return rec_ids
+
+
     def rank(self, test_loader):
         rec_ids = None
 
         for us, cands_ids in test_loader:
-            us = us.numpy()
-            cands_ids = cands_ids.numpy() # batch * cand_num
+            us = us.numpy().astype(np.int32)  # Ensure us is of integer type
+            cands_ids = cands_ids.numpy()  # batch * cand_num
 
-            user_emb = np.expand_dims(self.user_vec[us, :], axis=1) # batch * factor -> batch * 1 * factor
-            items_emb = self.item_vec[cands_ids, :].transpose(0, 2, 1)  # batch * cand_num * factor -> batch * factor * cand_num
-            scores = np.einsum('BNi,BiM -> BNM', user_emb, items_emb).squeeze() # batch * 1 * cand_num -> batch * cand_num
-            rank_ids = np.argsort(-scores)[:, :self.topk]
-            rank_list = cands_ids[np.repeat(np.arange(len(rank_ids)).reshape(-1, 1), rank_ids.shape[1], axis=1), rank_ids]
+            scores = np.full(cands_ids.shape, float('-inf'))  # Initialize scores with -inf
+
+            for i, user in enumerate(us):
+                valid_cands = cands_ids[i] != -1  # Identify valid candidates
+                if not np.any(valid_cands):
+                    continue  # Skip if there are no valid candidates
+                user_emb = self.user_vec[user, :]  # User embedding
+                # Ensure that cands_ids used for indexing is explicitly converted to integers
+                valid_indices = cands_ids[i][valid_cands].astype(np.int32)  # Convert to integer type
+                valid_items_emb = self.item_vec[valid_indices, :]  # Select valid item embeddings using integer indices
+                user_scores = user_emb.dot(valid_items_emb.T)  # Compute scores for valid candidates
+                
+                scores[i][valid_cands] = user_scores  # Assign computed scores to valid positions
+
+            # Sort scores and select top-k 
+            rank_ids = np.argsort(-scores)[:, :self.topk]  
+            # Extract top-k ranked candidate IDs using integer indices for sorting
+            rank_list = np.take_along_axis(cands_ids, rank_ids.astype(np.int32), axis=1)  
             
             rec_ids = rank_list if rec_ids is None else np.vstack([rec_ids, rank_list])
-
         return rec_ids
+
 
     def full_rank(self, u):
         scores = self.user_vec[u, :].dot(self.item_vec.T) #  (item_num,)
