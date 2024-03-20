@@ -52,7 +52,8 @@ if __name__ == '__main__':
     config['logger'] = logger
     ''' Test Process for Metrics Exporting '''
     reader, processor = RawDataReader(config), Preprocessor(config)
-    use_boarding_box = config['boarding_box']
+    train_bounding_box = config['train_bounding_box']
+    test_bounding_box = config['test_bounding_box']
     df = reader.get_data()
     df = processor.process(df)
     user_num, item_num = processor.user_num, processor.item_num
@@ -64,6 +65,7 @@ if __name__ == '__main__':
 
     ''' Train Test split '''
     splitter = TestSplitter(config)
+    logger.info("Test Split Method: %s", config['test_method'])
     train_index, test_index = splitter.split(df)
     train_set, test_set = df.iloc[train_index, :].copy(), df.iloc[test_index, :].copy()
 
@@ -72,14 +74,20 @@ if __name__ == '__main__':
     total_train_ur = get_ur(train_set)
     config['train_ur'] = total_train_ur
     
-    if use_boarding_box:
+    if train_bounding_box or test_bounding_box:
         items_info = processor.create_items_info()
-
-        logger.info("Use boarding box size of %f", config['min_size'])
-        user_bboxes= processor.create_user_bboxes(items_info, total_train_ur, config['min_size'])
-        file_name = "user_bboxs_filtered_"+str(config['min_size'])+".json"
+        logger.info("Use bounding box size of %f", config['min_size'])
+        user_bboxes= processor.create_user_bboxes(items_info, total_train_ur, test_ur, config['min_size'], test_bounding_box)
+        if train_bounding_box:
+            logger.info("Use bounding box from the train set")
+            file_name = "user_bboxs_filtered_"+str(config['min_size'])+"_train.json"
+        elif test_bounding_box:
+            logger.info("Use bounding box from the test set")
+            file_name = "user_bboxs_filtered_"+str(config['min_size'])+"_test.json"
         with open(file_name, 'w') as f:
             json.dump(user_bboxes, f)
+        
+        
             
     ''' build and train model '''
     s_time = time.time()
@@ -120,7 +128,7 @@ if __name__ == '__main__':
 
     ''' build candidates set '''
     logger.info('Start Calculating Metrics...')
-    if use_boarding_box:
+    if test_bounding_box or train_bounding_box:
         test_u, test_ucands = build_candidates_set_per_user(test_ur, total_train_ur, items_info, user_bboxes, config)
     else:
         test_u, test_ucands = build_candidates_set(test_ur, total_train_ur, config)
@@ -137,7 +145,10 @@ if __name__ == '__main__':
     ''' calculating KPIs '''
     logger.info('Save metric@k result to res folder...')
     result_save_path = f"./res/{config['dataset']}/{config['prepro']}/{config['test_method']}/"
-    algo_prefix = f"{config['loss_type']}_{config['algo_name']}"
+    if test_bounding_box:
+        algo_prefix = f"test_{config['min_size']}_{config['loss_type']}_{config['algo_name']}"
+    elif train_bounding_box:
+        algo_prefix = f"train_{config['min_size']}_{config['loss_type']}_{config['algo_name']}"
     common_prefix = f"with_{config['sample_ratio']}{config['sample_method']}"
 
     ensure_dir(result_save_path)

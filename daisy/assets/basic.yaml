@@ -26,8 +26,9 @@ init_method: 'default'
 optimizer: 'default'
 early_stop: True
 
-boarding_box: False
-min_size: 1
+train_bounding_box: False
+min_size: 0
+test_bounding_box: False
 
 data_path: 'data/'
 res_path: ~

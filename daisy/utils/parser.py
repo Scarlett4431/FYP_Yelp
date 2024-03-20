@@ -134,9 +134,12 @@ def parse_args():
     parser.add_argument("--early_stop",
                         action="store_true",
                         help="whether to activate early stop mechanism")
-    parser.add_argument("--boarding_box",
+    parser.add_argument("--train_bounding_box",
                     action="store_true",
                     help="whether to activate early stop mechanism")
+    parser.add_argument("--test_bounding_box",
+                        action="store_true",
+                        help="whether to activate early stop mechanism")
     args = parser.parse_args()
 
     return args

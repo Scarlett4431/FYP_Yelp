@@ -53,31 +53,43 @@ def get_ir(df):
     return ir
 
 
+import numpy as np
+import os
+import pickle
+import csv
+
+
 
 def build_candidates_set_per_user(test_ur, train_ur, items_info, user_bboxes, config, drop_past_inter=True):
     candidates_num = config['cand_num']
     min_size = config['min_size']
+    test_bounding_box = config['test_bounding_box']
+    train_bounding_box = config['train_bounding_box']
+    logger = config['logger']
     # Check if the .pkl file exists
-    file_name = 'data/yelp/items_within_bb_'+ str(min_size)+ '.pkl'
+    if test_bounding_box:
+        file_name = 'data/yelp/items_within_bb_'+ str(min_size)+  '_test.pkl'
+    elif train_bounding_box:
+        file_name = 'data/yelp/items_within_bb_'+ str(min_size)+ '_train.pkl'
     if os.path.exists(file_name):
-        print("Loading items_within_bb from pickle file.")
+        logger.info("Loading items_within_bb from pickle file.")
         with open(file_name, 'rb') as f:
             items_within_bb = pickle.load(f)
     else:
-        print("Pickle file not found. Computing items_within_bb.")
+        logger.info("Pickle file not found. Computing items_within_bb.")
         items_within_bb = {user_id: set() for user_id in user_bboxes}
-        for item_id, item in items_info.items():
-            for user_id, bb in user_bboxes.items():
-                min_lat, max_lat, min_lon, max_lon = bb
+        for user_id, bb in user_bboxes.items():
+            #this user is from the training set, if not the user would not be in items_within_bb
+            min_lat, max_lat, min_lon, max_lon = bb
+            for item_id, item in items_info.items():
                 if min_lat <= item['latitude'] <= max_lat and min_lon <= item['longitude'] <= max_lon:
                     items_within_bb[user_id].add(item_id)
-        print("Precomputing user's bounding boxes done")
+        logger.info("Precomputing user's bounding boxes done")
         # Save the computed items_within_bb to a .pkl file for future use
         with open(file_name, 'wb') as f:
             pickle.dump(items_within_bb, f)
             
     item_num = config['item_num']
-    candidates_num = config['cand_num']
     pos_filtered_percentages = []
     neg_filtered_percentages = []
     test_ucands, test_u = [], []
@@ -91,7 +103,7 @@ def build_candidates_set_per_user(test_ur, train_ur, items_info, user_bboxes, co
             neg_samples = np.random.choice(neg_items, size=sample_num)
             samples = np.concatenate((neg_samples, list(r)), axis=None)
         if u in items_within_bb:
-            test_pos_samples = [item for item in r if item in items_within_bb[u]]
+            test_pos_samples = list(r)
             test_neg_samples = [item for item in neg_samples if item in items_within_bb[u]]
             pos_filtered_percentage = 100 * (1 - len(test_pos_samples) / len(list(r))) if len(list(r)) > 0 else 0
             neg_filtered_percentage = 100 * (1 - len(test_neg_samples) / len(neg_items)) if len(neg_items) > 0 else 0
@@ -106,7 +118,11 @@ def build_candidates_set_per_user(test_ur, train_ur, items_info, user_bboxes, co
     
         test_ucands.append([u, samples])
         test_u.append(u)
-    file_path = 'filter_percentage_'+ str(config['min_size']) + '.csv'
+        
+    if test_bounding_box:
+        file_path = 'filter_percentage_'+ str(config['min_size']) + '_test.csv'
+    elif train_bounding_box:
+       file_path = 'filter_percentage_'+ str(config['min_size']) + '_train.csv'
 
     # Open the file in write mode ('w') and create a csv.writer object
     # newline='' is used to prevent writing extra blank rows in some environments

@@ -218,6 +218,7 @@ class NGCF(GeneralRecommender):
         pred = torch.matmul(u_embedding, i_embedding.t())
 
         return pred.cpu().item()
+    
 
     def rank(self, test_loader):
         if self.restore_user_e is None or self.restore_item_e is None:
@@ -229,17 +230,55 @@ class NGCF(GeneralRecommender):
             us = us.to(self.device)
             cands_ids = cands_ids.to(self.device)
 
-            user_emb = self.restore_user_e[us].unsqueeze(dim=1) # batch * 1 * factor
-            item_emb = self.restore_item_e[cands_ids].transpose(1, 2) # batch * factor * cand_num
-            scores = torch.bmm(user_emb, item_emb).squeeze() # batch * cand_num
+            # Mask to identify valid (non-padded) entries
+            valid_mask = cands_ids != -1
+
+            user_emb = self.restore_user_e[us].unsqueeze(dim=1)  # batch * 1 * factor
+            item_emb = self.restore_item_e[cands_ids].transpose(1, 2)  # batch * factor * cand_num
+            
+            # Apply mask to item embeddings, setting embeddings of padded items to zero
+            # This prevents them from affecting the score
+            item_emb = item_emb * valid_mask.unsqueeze(1).float()
+
+            scores = torch.bmm(user_emb, item_emb).squeeze()  # batch * cand_num
+
+            # Temporarily replace scores for padded items with -inf to ensure they are ranked last
+            scores = torch.where(valid_mask, scores, torch.tensor(float('-inf'), device=self.device))
 
             rank_ids = torch.argsort(scores, descending=True)
             rank_list = torch.gather(cands_ids, 1, rank_ids)
+            
+            # Optionally, replace -1s in rank_list if you want to maintain original padding
+            rank_list = torch.where(valid_mask, rank_list, torch.tensor(-1, device=self.device))
+
             rank_list = rank_list[:, :self.topk]
 
             rec_ids = torch.cat((rec_ids, rank_list), 0)
 
         return rec_ids.cpu().numpy()
+
+
+    # def rank(self, test_loader):
+    #     if self.restore_user_e is None or self.restore_item_e is None:
+    #         self.restore_user_e, self.restore_item_e = self.forward()
+
+    #     rec_ids = torch.tensor([], device=self.device)
+
+    #     for us, cands_ids in test_loader:
+    #         us = us.to(self.device)
+    #         cands_ids = cands_ids.to(self.device)
+
+    #         user_emb = self.restore_user_e[us].unsqueeze(dim=1) # batch * 1 * factor
+    #         item_emb = self.restore_item_e[cands_ids].transpose(1, 2) # batch * factor * cand_num
+    #         scores = torch.bmm(user_emb, item_emb).squeeze() # batch * cand_num
+
+    #         rank_ids = torch.argsort(scores, descending=True)
+    #         rank_list = torch.gather(cands_ids, 1, rank_ids)
+    #         rank_list = rank_list[:, :self.topk]
+
+    #         rec_ids = torch.cat((rec_ids, rank_list), 0)
+
+    #     return rec_ids.cpu().numpy()
 
     def full_rank(self, u):
         if self.restore_user_e is None or self.restore_item_e is None:

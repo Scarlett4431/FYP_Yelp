@@ -214,7 +214,9 @@ class Preprocessor(object):
         area = width * height
         return area
         
-    def update_bbox(self, bbox, lat, lon):
+    
+    
+    def update_bbox(self, bbox, lat, lon, min_size):
         """
         Update the bounding box to include a new point (lat, lon) and ensure it has a minimum size.
         
@@ -230,24 +232,72 @@ class Preprocessor(object):
         min_lat = min(min_lat, lat)
         max_lat = max(max_lat, lat)
         min_lon = min(min_lon, lon)
-        max_lon = max(max_lon, lon)    
-        return min_lat, max_lat, min_lon, max_lon
-    
-    def adjust_box(self, bbox, min_size):
+        max_lon = max(max_lon, lon)
+        
         # Check if the bounding box is too small and adjust if necessary
-        min_lat, max_lat, min_lon, max_lon = bbox
         if max_lat - min_lat < min_size:
-            expansion = (max_lat - min_lat) * 0.5
+            expansion = (min_size - (max_lat - min_lat)) / 2
             min_lat -= expansion
             max_lat += expansion
             
         if max_lon - min_lon < min_size:
-            expansion = (max_lon - min_lon) * 0.5
+            expansion = (min_size - (max_lon - min_lon)) / 2
             min_lon -= expansion
             max_lon += expansion
+        
         return min_lat, max_lat, min_lon, max_lon
+
+    def adjust_new_bounding_box(self, gt_lat, gt_lon, width, height):
+        """
+        Adjust the bounding box to randomly include the ground truth item.
+
+        This function calculates one corner of the new bounding box at a random position
+        around the ground truth item and then derives the opposite corner based on the width and height.
+        """
+        # Define shifts for the new bounding box to randomly include the ground truth item
+        shift_lat = np.random.uniform(-height, height)
+        shift_lon = np.random.uniform(-width, width)
+
+        # Calculate one corner of the new bounding box
+        corner1_lat = gt_lat + shift_lat
+        corner1_lon = gt_lon + shift_lon
+
+        # Ensure the bounding box includes the ground truth item by calculating the opposite corner
+        corner2_lat = corner1_lat + np.sign(shift_lat) * height
+        corner2_lon = corner1_lon + np.sign(shift_lon) * width
+
+        # Return the new bounding box coordinates, ensuring min and max values are properly assigned
+        new_min_lat, new_max_lat = min(corner1_lat, corner2_lat), max(corner1_lat, corner2_lat)
+        new_min_lon, new_max_lon = min(corner1_lon, corner2_lon), max(corner1_lon, corner2_lon)
+
+        return new_min_lat, new_max_lat, new_min_lon, new_max_lon
+
+    def adjust_new_bounding_box_for_test(self,test_ur, items_info, user_bboxes):
+        for u, r in test_ur.items():
+            # Skip if r is empty
+            if not r:
+                continue
+            ground_truth_item = next(iter(r))  # Select one item as the ground truth
+            ground_truth_location = items_info[ground_truth_item]
+
+            if u in user_bboxes:
+                # Get the original bounding box and its dimensions
+                min_lat, max_lat, min_lon, max_lon = user_bboxes[u]
+                width = max_lon - min_lon
+                height = max_lat - min_lat
+
+                # Assuming ground_truth_location has 'latitude' and 'longitude' keys
+                gt_lat = ground_truth_location['latitude']
+                gt_lon = ground_truth_location['longitude']
+
+                # Adjust the bounding box to randomly include the ground truth item
+                new_min_lat, new_max_lat, new_min_lon, new_max_lon = self.adjust_new_bounding_box(gt_lat, gt_lon, width, height)
+                user_bboxes[u] = new_min_lat, new_max_lat, new_min_lon, new_max_lon
+            return user_bboxes
+
+
     
-    def create_user_bboxes(self, items_info, total_train_ur, min_size):
+    def create_user_bboxes(self, items_info, total_train_ur, test_ur, min_size, test_bounding_box=False):
         """
         Create a dictionary mapping each user integer index to a bounding box based on the businesses they have interacted with in the training dataset.
 
@@ -277,11 +327,11 @@ class Preprocessor(object):
                 continue  # Skip businesses with no geographic information
 
             bbox = user_bboxes.get(user_id, (float('inf'), float('-inf'), float('inf'), float('-inf')))
-            min_lat, max_lat, min_lon, max_lon = self.update_bbox(bbox, business_info['latitude'], business_info['longitude'])
+            min_lat, max_lat, min_lon, max_lon = self.update_bbox(bbox, business_info['latitude'], business_info['longitude'], min_size)
             user_bboxes[user_id] = (min_lat, max_lat, min_lon, max_lon)
-        for user_id, bbox in user_bboxes.items():
-            min_lat, max_lat, min_lon, max_lon = self.adjust_box(bbox, min_size)
-            user_bboxes[user_id] = (min_lat, max_lat, min_lon, max_lon)
+        if test_bounding_box:    
+            print("adjest the bounding box using test ground truth")     
+            user_bboxes = self.adjust_new_bounding_box_for_test(test_ur, items_info, user_bboxes)
         return user_bboxes
 
         

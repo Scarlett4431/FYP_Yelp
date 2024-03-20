@@ -178,6 +178,30 @@ class LightGCN(GeneralRecommender):
 
         return pred.cpu().item()
 
+    # def rank(self, test_loader):
+    #     if self.restore_user_e is None or self.restore_item_e is None:
+    #         self.restore_user_e, self.restore_item_e = self.forward()
+
+    #     rec_ids = torch.tensor([], device=self.device)
+
+    #     for us, cands_ids in test_loader:
+    #         us = us.to(self.device)
+    #         cands_ids = cands_ids.to(self.device)
+
+    #         user_emb = self.restore_user_e[us].unsqueeze(dim=1) # batch * 1 * factor
+    #         item_emb = self.restore_item_e[cands_ids].transpose(1, 2) # batch * factor * cand_num
+    #         scores = torch.bmm(user_emb, item_emb).squeeze() # batch * cand_num
+
+    #         rank_ids = torch.argsort(scores, descending=True)
+    #         rank_list = torch.gather(cands_ids, 1, rank_ids)
+    #         rank_list = rank_list[:, :self.topk]
+
+    #         rec_ids = torch.cat((rec_ids, rank_list), 0)
+
+    #     return rec_ids.cpu().numpy()
+    
+    import torch
+
     def rank(self, test_loader):
         if self.restore_user_e is None or self.restore_item_e is None:
             self.restore_user_e, self.restore_item_e = self.forward()
@@ -188,17 +212,31 @@ class LightGCN(GeneralRecommender):
             us = us.to(self.device)
             cands_ids = cands_ids.to(self.device)
 
-            user_emb = self.restore_user_e[us].unsqueeze(dim=1) # batch * 1 * factor
-            item_emb = self.restore_item_e[cands_ids].transpose(1, 2) # batch * factor * cand_num
-            scores = torch.bmm(user_emb, item_emb).squeeze() # batch * cand_num
+            # Mask to identify valid (non-padded) entries
+            valid_mask = cands_ids != -1
+
+            user_emb = self.restore_user_e[us].unsqueeze(dim=1)  # batch * 1 * factor
+            item_emb = self.restore_item_e[cands_ids].transpose(1, 2)  # batch * factor * cand_num
+
+            # Use valid_mask to exclude padded entries from influencing scores
+            # Multiplying by valid_mask to zero-out scores for padded items
+            valid_mask_expanded = valid_mask.unsqueeze(1).expand(-1, item_emb.size(1), -1).float()
+            scores = torch.bmm(user_emb, item_emb * valid_mask_expanded).squeeze()
+
+            # Set scores for padded items to -inf to ensure they are sorted last
+            scores = torch.where(valid_mask, scores, torch.tensor(float('-inf'), device=self.device))
 
             rank_ids = torch.argsort(scores, descending=True)
             rank_list = torch.gather(cands_ids, 1, rank_ids)
             rank_list = rank_list[:, :self.topk]
 
+            # Optionally, ensure padding remains in place for output
+            # This step may be redundant if scores for padding are set to -inf,
+            # as padded values would naturally be sorted to the end
             rec_ids = torch.cat((rec_ids, rank_list), 0)
 
         return rec_ids.cpu().numpy()
+
 
     def full_rank(self, u):
         if self.restore_user_e is None or self.restore_item_e is None:

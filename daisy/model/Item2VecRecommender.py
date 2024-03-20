@@ -78,6 +78,26 @@ class Item2Vec(GeneralRecommender):
         
         return pred.cpu().item()
 
+    # def rank(self, test_loader):
+    #     rec_ids = torch.tensor([], device=self.device)
+
+    #     for us, cands_ids in test_loader:
+    #         us = us.to(self.device)
+    #         cands_ids = cands_ids.to(self.device)
+
+    #         user_emb = self.user_embedding(us).unsqueeze(dim=1) # batch * factor -> batch * 1 * factor
+    #         item_emb = self.shared_embedding(cands_ids).transpose(1, 2) # batch * cand_num * factor -> batch * factor * cand_num 
+    #         scores = torch.bmm(user_emb, item_emb).squeeze() # batch * 1 * cand_num -> batch * cand_num
+
+    #         rank_ids = torch.argsort(scores, descending=True)
+    #         rank_list = torch.gather(cands_ids, 1, rank_ids)
+    #         rank_list = rank_list[:, :self.topk]
+
+    #         rec_ids = torch.cat((rec_ids, rank_list), 0)
+
+    #     return rec_ids.cpu().numpy()
+    
+
     def rank(self, test_loader):
         rec_ids = torch.tensor([], device=self.device)
 
@@ -85,17 +105,30 @@ class Item2Vec(GeneralRecommender):
             us = us.to(self.device)
             cands_ids = cands_ids.to(self.device)
 
-            user_emb = self.user_embedding(us).unsqueeze(dim=1) # batch * factor -> batch * 1 * factor
-            item_emb = self.shared_embedding(cands_ids).transpose(1, 2) # batch * cand_num * factor -> batch * factor * cand_num 
-            scores = torch.bmm(user_emb, item_emb).squeeze() # batch * 1 * cand_num -> batch * cand_num
+            # Mask to identify valid (non-padded) entries
+            valid_mask = cands_ids != -1
+
+            user_emb = self.user_embedding(us).unsqueeze(dim=1)  # batch * 1 * factor
+            item_emb = self.shared_embedding(cands_ids).transpose(1, 2)  # batch * factor * cand_num
+            
+            scores = torch.bmm(user_emb, item_emb).squeeze()  # batch * cand_num
+            
+            # Handle scores for padded entries by setting them to -inf to ensure they're ranked last
+            scores = torch.where(valid_mask, scores, torch.tensor(float('-inf'), device=self.device))
 
             rank_ids = torch.argsort(scores, descending=True)
             rank_list = torch.gather(cands_ids, 1, rank_ids)
+            
+            # Slicing the top-k items, ensuring padded values are handled correctly
             rank_list = rank_list[:, :self.topk]
-
+            
+            # Ensure padding is correctly handled in the final output
+            # This is implicitly done by setting scores of padded items to -inf, so they are ranked last
+            
             rec_ids = torch.cat((rec_ids, rank_list), 0)
 
         return rec_ids.cpu().numpy()
+
 
     def full_rank(self, u):
         u = torch.tensor(u, device=self.device)
